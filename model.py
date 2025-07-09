@@ -10,12 +10,12 @@ class InitialLayer(nn.Module):
         self.layer = nn.Sequential(
             nn.Conv2d(
                 in_channels=input_dim,
-                out_channels=32,
+                out_channels=64,
                 kernel_size=7,
                 stride=2,
                 padding=1
             ),
-            nn.BatchNorm2d(32),
+            nn.BatchNorm2d(64),
             nn.ReLU(),
             nn.MaxPool2d(kernel_size=3, stride=2, padding=1)
         )
@@ -84,5 +84,44 @@ class TransitionLayer(nn.Module):
         x = self.transition(x)
         return x
 
-# Final Dense Net
+# Final Dense Net - implementation 121
+class DenseNet121(nn.Module):
+    def __init__(self, num_classes: int, input_dim: int = 3, growth_rate: int = 32, number_of_blocks: int = 4):
+        super(DenseNet121).__init__()
+        self.input_dim = input_dim
+        self.growth_rate = growth_rate
+        self.number_of_blocks = number_of_blocks
+        self.num_classes = num_classes
 
+        self.initial_layer = InitialLayer(input_dim)
+
+    def forward(self, x):
+        x = self.initial_layer(x)
+
+        # Processing through the dense and transtion blocks
+        for i in range(self.number_of_blocks - 1):
+            x = DenseBlock(
+                input_dim = x.shape[1],
+                growth_rate = self.growth_rate,
+                num_layers = 6 * (2**i)
+            )(x)
+            x = TransitionLayer(
+                input_dim = x.shape[1]
+            )(x)
+        x = DenseBlock(
+            input_dim = x.shape[1],
+            growth_rate = self.growth_rate,
+            num_layers = 16
+        )(x)
+
+        x = nn.Sequential(
+            nn.BatchNorm2d(x.shape[1]),
+            nn.ReLU()
+        )(x)
+
+        # Final classification layer
+        x = nn.AdaptiveAvgPool2d((1, 1))(x)
+        x = nn.Flatten()(x)
+        x = nn.Linear(x.shape[1], self.num_classes)(x)
+
+        return x
