@@ -21,9 +21,10 @@ image = (modal.Image.debian_slim()
         .add_local_python_source("model")
         )
 
-class PillDataset(Dataset):
+# Dataloader for the data
+class SkinImageDataset(Dataset):
     def __init__(self, csv_file: str, image_dir: str, transform=None):
-        super(PillDataset, self).__init__()
+        super(SkinImageDataset, self).__init__()
         self.csv_file = csv_file
         self.image_dir = image_dir
         self.transform = transform
@@ -40,13 +41,18 @@ class PillDataset(Dataset):
         label = self.data.iloc[idx, 1]
         return image, label
     
-@app.function(image=image, secrets=[modal.Secret.from_name("huggingface-token")], volumes={"/data": volume})
+@app.function(image=image, secrets=[modal.Secret.from_name("huggingface-token")], volumes={"/data": volume}, timeout=3600)
 def download_data():
     print("Downloading data...")
     try:
         import os
         from huggingface_hub import login
         from datasets import load_dataset
+
+        # condition for existence check
+        if os.path.exists("/data/sd-198-metadata"):
+            print("skipping downloading as the data already exists")
+            return
 
         login(token=os.environ["HUGGINGFACE_SECRET_KEY"])
         # Creating dir for image data
@@ -57,6 +63,18 @@ def download_data():
     except Exception as e:
         print(f"Error in downloading data: {e}")
 
+@app.function(image=image, volumes={"/data":volume})
+def load_dataset():
+    from datasets import load_from_disk
+    print("Loading the data..")
+    try:
+        dataset = load_from_disk("/data/sd-198-metadata")
+        train_data = dataset["train"]
+
+        print(train_data[0])
+    except Exception as e:
+        print("Error occured in loading the dataset {e}")
+
 
 @app.function(image=image, volumes={"/data": volume, "/model": model_volume}, gpu="A10G", timeout=3600*5)
 def train():
@@ -66,4 +84,6 @@ def train():
 
 @app.local_entrypoint()
 def main():
-    train.remote()
+    # download_data.remote()
+    load_dataset.remote()
+    # train.remote()
