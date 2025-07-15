@@ -3,10 +3,11 @@ import torch.nn as nn
 import torch
 import torchvision.transforms as transforms
 import cv2
-import pandas as pd
+from datasets import load_from_disk
 from model import DenseNet121
-from torch.utils.data import Dataset
+from torch.utils.data import Dataset, Subset
 import os
+import json
 
 volume = modal.Volume.from_name("pill-classifier-data", create_if_missing=True)
 model_volume = modal.Volume.from_name("pill-classifier-model", create_if_missing=True)
@@ -23,24 +24,32 @@ image = (modal.Image.debian_slim()
 
 # Dataloader for the data
 class SkinImageDataset(Dataset):
-    def __init__(self, csv_file: str, image_dir: str, transform=None):
+    def __init__(self, image_dir: str, transform=None):
         super(SkinImageDataset, self).__init__()
-        self.csv_file = csv_file
         self.image_dir = image_dir
         self.transform = transform
-        self.data = pd.read_csv(csv_file)
+
+        # Loading the data
+        self.dataset = load_from_disk(self.image_dir)
+
+    @property
+    def get_class_name_mapping(self):
+        train_data = self.dataset["train"]
+        label_names = train_data.features["labels"].names
+
+        label_name_mapping = {idx: name for idx, name in enumerate(label_names)}
+        return label_name_mapping
 
     def __len__(self):
         return len(self.data)
 
     def __getitem__(self, idx):
-        img_name = os.path.join(self.image_dir, self.data.iloc[idx, 0])
-        image = cv2.imread(img_name)
+        img, lbl = self.dataset["train"][idx]["image"], self.dataset['train'][idx]["label"]
         if self.transform:
-            image = self.transform(image)
-        label = self.data.iloc[idx, 1]
-        return image, label
+            img = self.transform(img)
+        return img, lbl
     
+
 @app.function(image=image, secrets=[modal.Secret.from_name("huggingface-token")], volumes={"/data": volume}, timeout=3600)
 def download_data():
     print("Downloading data...")
@@ -71,15 +80,18 @@ def load_dataset():
         dataset = load_from_disk("/data/sd-198-metadata")
         train_data = dataset["train"]
 
-        print(train_data[0])
+        # for i in range(len(train_data)):
+        #     print(train_data[i])
+        print(train_data[0]["image"], train_data[0]["label"])
+        train_data[0]["image"].save("/data/sample.jpg")
     except Exception as e:
-        print("Error occured in loading the dataset {e}")
+        print(f"Error occured in loading the dataset {e}")
 
 
 @app.function(image=image, volumes={"/data": volume, "/model": model_volume}, gpu="A10G", timeout=3600*5)
 def train():
-    print("This code is running on a remote worker!")
-    return 3**2
+    print("Training the model...")
+    
 
 
 @app.local_entrypoint()
