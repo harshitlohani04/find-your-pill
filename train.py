@@ -72,30 +72,39 @@ def download_data():
     except Exception as e:
         print(f"Error in downloading data: {e}")
 
-@app.function(image=image, volumes={"/data":volume})
-def load_dataset():
-    from datasets import load_from_disk
-    print("Loading the data..")
-    try:
-        dataset = load_from_disk("/data/sd-198-metadata")
-        train_data = dataset["train"]
+# @app.function(image=image, volumes={"/data":volume})
+# def load_dataset():
+#     from datasets import load_from_disk
+#     print("Loading the data..")
+#     try:
+#         dataset = load_from_disk("/data/sd-198-metadata")
+#         train_data = dataset["train"]
 
-        # for i in range(len(train_data)):
-        #     print(train_data[i])
-        print(train_data[0]["image"], train_data[0]["label"])
-        train_data[0]["image"].save("/data/sample.jpg")
-    except Exception as e:
-        print(f"Error occured in loading the dataset {e}")
+#         # for i in range(len(train_data)):
+#         #     print(train_data[i])
+#         print(train_data[0]["image"], train_data[0]["label"])
+#         train_data[0]["image"].save("/data/sample.jpg")
+#     except Exception as e:
+#         print(f"Error occured in loading the dataset {e}")
 
 
 @app.function(image=image, volumes={"/data": volume, "/model": model_volume}, gpu="A10G", timeout=3600*5)
 def train():
-    print("Training the model...")
-    
+    from sklearn.metrics import top_k_accuracy_score
+    from sklearn.model_selection import StratifiedKFold
 
+    print("Training the model...")
+    image_transform = transforms.Compose([
+        transforms.Resize((256, 256)),
+        transforms.RandomRotation(10), # Rotate between -10 and 10 degrees
+        transforms.ToTensor()
+    ])
+    dataloader = SkinImageDataset(image_dir="/data/sdn-198-metadata", transform=None)
+    
 
 @app.local_entrypoint()
 def main():
     # download_data.remote()
-    load_dataset.remote()
+    # load_dataset.remote()
     # train.remote()
+    pass
