@@ -5,9 +5,10 @@ import torchvision.transforms as transforms
 import cv2
 from datasets import load_from_disk
 from model import DenseNet121
-from torch.utils.data import Dataset, Subset
+from torch.utils.data import Dataset, Subset, DataLoader
 import os
 import json
+import tqdm
 
 volume = modal.Volume.from_name("pill-classifier-data", create_if_missing=True)
 model_volume = modal.Volume.from_name("pill-classifier-model", create_if_missing=True)
@@ -28,7 +29,6 @@ class SkinImageDataset(Dataset):
         super(SkinImageDataset, self).__init__()
         self.image_dir = image_dir
         self.transform = transform
-
         # Loading the data
         self.dataset = load_from_disk(self.image_dir)
 
@@ -41,7 +41,7 @@ class SkinImageDataset(Dataset):
         return label_name_mapping
 
     def __len__(self):
-        return len(self.data)
+        return len(self.label_names)
 
     def __getitem__(self, idx):
         img, lbl = self.dataset["train"][idx]["image"], self.dataset['train'][idx]["label"]
@@ -72,39 +72,107 @@ def download_data():
     except Exception as e:
         print(f"Error in downloading data: {e}")
 
-# @app.function(image=image, volumes={"/data":volume})
-# def load_dataset():
-#     from datasets import load_from_disk
-#     print("Loading the data..")
-#     try:
-#         dataset = load_from_disk("/data/sd-198-metadata")
-#         train_data = dataset["train"]
+@app.function(image=image, volumes={"/data":volume})
+def fetch_dataset_information():
+    from datasets import load_from_disk
+    try:
+        dataset = load_from_disk("/data/sd-198-metadata")
+        train_data = dataset["train"]
+        labels = []
+        for img in train_data:
+            labels.append(img["label"])
+        classes = set(labels)
 
-#         # for i in range(len(train_data)):
-#         #     print(train_data[i])
-#         print(train_data[0]["image"], train_data[0]["label"])
-#         train_data[0]["image"].save("/data/sample.jpg")
-#     except Exception as e:
-#         print(f"Error occured in loading the dataset {e}")
+        return labels, classes, train_data
+    except Exception as e:
+        print(f"Error occured in loading the dataset {e}")
 
 
 @app.function(image=image, volumes={"/data": volume, "/model": model_volume}, gpu="A10G", timeout=3600*5)
 def train():
-    from sklearn.metrics import top_k_accuracy_score
+    # from sklearn.metrics import top_k_accuracy_score
     from sklearn.model_selection import StratifiedKFold
+    import torch.optim as optim
 
     print("Training the model...")
     image_transform = transforms.Compose([
-        transforms.Resize((256, 256)),
-        transforms.RandomRotation(10), # Rotate between -10 and 10 degrees
+        transforms.Resize((1500, 1500)),
+        transforms.RandomRotation(90),
         transforms.ToTensor()
     ])
-    dataloader = SkinImageDataset(image_dir="/data/sdn-198-metadata", transform=None)
-    
+    labels, num_classes, train_data = fetch_dataset_information()
+    # training params initialization
+    epochs = 100
+    criterion = nn.CrossEntropyLoss()
+    skf = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
+
+    # main training part
+    for _, (train_idx, val_idx) in enumerate(skf.split(train_data, labels)):
+        train_subset = Subset(SkinImageDataset("/data/sdn-198-metadata", transform=image_transform), train_idx)
+        val_subset = Subset(SkinImageDataset("/data/sdn-198-metadata", transform=image_transform), val_idx)
+        # initializing the dataloaders
+        trainLoader = DataLoader(
+            train_subset,
+            shuffle=True,
+            batch_size=16
+        )
+        valLoader = DataLoader(
+            val_subset,
+            batch_size=16,
+            shuffle=False
+        )
+        #instantiating the model
+        model = DenseNet121(num_classes=num_classes)
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        model.to(device)
+        optimizer = optim.Adam(params=model.parameters(), lr=0.0005, weight_decay=0.01)
+        lr_scheduler = torch.optim.lr_scheduler.OneCycleLR(optimizer=optimizer, max_lr=0.001, epochs=epochs, steps_per_epoch=len(trainLoader))
+
+        for epoch in epochs:
+            # main training
+            model.train()
+            epoch_loss = 0
+            for data, label in trainLoader:
+                data, label = data.to(device), label.to(device)
+                outputs = model(data)
+                loss = criterion(outputs, label)
+                epoch_loss += loss
+
+                optimizer.zero_grad()
+                loss.backward()
+                optimizer.step()
+                lr_scheduler.step()
+
+            avg_epoch_loss = epoch_loss/len(trainLoader)
+            # validation loop
+            model.eval()
+            best_accuracy = 0
+            val_loss = 0
+            correct = 0
+            total = 0
+            with torch.no_grad():
+                for data, label in valLoader:
+                    data, label = data.to(device), label.to(device)
+                    outputs = model(data)
+
+                    _, predicted = torch.max(outputs, 1)
+                    correct += (predicted == label).sum().item()
+                    total += label.size(0)
+
+                    val_loss += criterion(outputs, label)
+                avg_val_loss = val_loss/len(valLoader)
+                accuracy = 100*correct/total
+                if accuracy > best_accuracy:
+                    best_accuracy = accuracy
+                    torch.save({
+                        "model_state_dict":model.state_dict(),
+                        "accuracy": best_accuracy,
+                        "epoch": epoch
+                    }, "/model/best_model.pth")
+            print(f"Epoch{epoch} average epoch loss : {avg_epoch_loss} -- average val loss : {avg_val_loss} -- best accuracy : {best_accuracy}")
 
 @app.local_entrypoint()
 def main():
     # download_data.remote()
     # load_dataset.remote()
-    # train.remote()
-    pass
+    train.remote()
