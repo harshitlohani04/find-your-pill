@@ -1,2 +1,2 @@
-# find-your-pill
-Snap an image of the pill that you are having doubts about, upload it on the site and then TADA!! you have all the insights about that drug
+# Skin Cure
+Having skin issues and want a quick analysis, skin cure provides you with the context based analysis of your skin disease. Just click a quick image upload it on the portal and TADA you have your analysis ready in just a few steps.
