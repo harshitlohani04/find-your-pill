@@ -44,6 +44,7 @@ class SkinImageDataset(Dataset):
         return len(self.label_names)
 
     def __getitem__(self, idx):
+        idx = int(idx)
         img, lbl = self.dataset["train"][idx]["image"], self.dataset['train'][idx]["label"]
         if self.transform:
             img = self.transform(img)
@@ -83,7 +84,7 @@ def fetch_dataset_information():
             labels.append(img["label"])
         classes = set(labels)
 
-        return labels, classes, train_data
+        return labels, classes, len(classes), train_data
     except Exception as e:
         print(f"Error occured in loading the dataset {e}")
 
@@ -97,10 +98,11 @@ def train():
     print("Training the model...")
     image_transform = transforms.Compose([
         transforms.Resize((1500, 1500)),
-        transforms.RandomRotation(90),
+        transforms.RandomRotation(5),
         transforms.ToTensor()
     ])
-    labels, num_classes, train_data = fetch_dataset_information()
+    labels, classes, num_classes, train_data = fetch_dataset_information.remote()
+    print(f"the number of classes are : {num_classes} and the classes are : {classes}")
     # training params initialization
     epochs = 100
     criterion = nn.CrossEntropyLoss()
@@ -108,8 +110,8 @@ def train():
 
     # main training part
     for _, (train_idx, val_idx) in enumerate(skf.split(train_data, labels)):
-        train_subset = Subset(SkinImageDataset("/data/sdn-198-metadata", transform=image_transform), train_idx)
-        val_subset = Subset(SkinImageDataset("/data/sdn-198-metadata", transform=image_transform), val_idx)
+        train_subset = Subset(SkinImageDataset("/data/sd-198-metadata", transform=image_transform), train_idx)
+        val_subset = Subset(SkinImageDataset("/data/sd-198-metadata", transform=image_transform), val_idx)
         # initializing the dataloaders
         trainLoader = DataLoader(
             train_subset,
@@ -125,28 +127,30 @@ def train():
         model = DenseNet121(num_classes=num_classes)
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         model.to(device)
-        optimizer = optim.Adam(params=model.parameters(), lr=0.0005, weight_decay=0.01)
-        lr_scheduler = torch.optim.lr_scheduler.OneCycleLR(optimizer=optimizer, max_lr=0.001, epochs=epochs, steps_per_epoch=len(trainLoader))
+        optimizer = optim.Adam(params=model.parameters(), lr=0.0001, weight_decay=0.01)
+        # lr_scheduler = torch.optim.lr_scheduler.OneCycleLR(optimizer=optimizer, max_lr=0.001, epochs=epochs, steps_per_epoch=len(trainLoader))
 
-        for epoch in epochs:
+        best_accuracy = 0
+        for epoch in range(epochs):
             # main training
             model.train()
             epoch_loss = 0
             for data, label in trainLoader:
+                print(label)
                 data, label = data.to(device), label.to(device)
                 outputs = model(data)
+                print(f"these are the output values : {outputs} and the size is : {outputs.size()}")
                 loss = criterion(outputs, label)
                 epoch_loss += loss
 
                 optimizer.zero_grad()
                 loss.backward()
                 optimizer.step()
-                lr_scheduler.step()
+                # lr_scheduler.step()
 
             avg_epoch_loss = epoch_loss/len(trainLoader)
             # validation loop
             model.eval()
-            best_accuracy = 0
             val_loss = 0
             correct = 0
             total = 0
