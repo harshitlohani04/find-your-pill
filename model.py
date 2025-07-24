@@ -64,7 +64,7 @@ class DenseBlock(nn.Module):
 
         self.denseblock = nn.ModuleList()
         for _ in range(self.num_layers):
-            self.denseblock.append(DenseLayer(input_dims=channels, growth_rate=self.growth_rate))
+            self.denseblock.append(DenseLayer(input_dim=channels, growth_rate=self.growth_rate))
             channels += growth_rate
         self.out_channels = channels
 
@@ -86,7 +86,7 @@ class TransitionLayer(nn.Module):
             nn.BatchNorm2d(self.input_dim),
             nn.Conv2d(
                 in_channels = self.input_dim,
-                out_channels = self.theta * self.input_dim,
+                out_channels = int(self.theta * self.input_dim),
                 kernel_size = 1,
                 padding = 0
             ),
@@ -99,7 +99,7 @@ class TransitionLayer(nn.Module):
 
 # Final Dense Net - implementation 121
 class DenseNet121(nn.Module):
-    def __init__(self, num_classes: int, input_dim: int = 3, growth_rate: int = 32, number_of_blocks: int = 4):
+    def __init__(self, num_classes: int, input_dim: int = 3, growth_rate: int = 16, number_of_blocks: int = 4):
         super().__init__()
         self.in_channels = input_dim
         self.growth_rate = growth_rate
@@ -114,7 +114,7 @@ class DenseNet121(nn.Module):
         self.transition = nn.ModuleList()
 
         for i in range(self.number_of_blocks-1):
-            numOfLayers = 6*(2**i)
+            numOfLayers = 2*(2**i)
             dense = DenseBlock(input_dims=channels, num_layers=numOfLayers, growth_rate=self.growth_rate)
             self.dense_connections.append(dense)
             channels += numOfLayers * (self.growth_rate)
@@ -123,17 +123,18 @@ class DenseNet121(nn.Module):
             self.transition.append(transition)
             channels = channels//2
 
-        self.final_dense_block = DenseBlock(input_dims=channels, num_layers=16, growth_rate=self.growth_rate)
-        channels += 16*self.growth_rate
+        self.final_dense_block = DenseBlock(input_dims=channels, num_layers=6, growth_rate=self.growth_rate)
+        channels += 6*self.growth_rate
         # final batch norm and other layers
         self.final_batch_norm = nn.Sequential(
             nn.BatchNorm2d(channels),
             nn.ReLU()
         )
+        print(f"final channels going into the classification layer : {channels} of type : {type(channels)}")
         self.classification = nn.Sequential(
             nn.AdaptiveAvgPool2d((1, 1)),
             nn.Flatten(),
-            nn.Linear(channels, self.num_classes)
+            nn.Linear(int(channels), self.num_classes)
         )
 
     def forward(self, x):
