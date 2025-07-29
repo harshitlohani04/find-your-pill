@@ -4,3 +4,4 @@ opencv-python
 huggingface_hub
 datasets
 scikit-learn
+numpy
