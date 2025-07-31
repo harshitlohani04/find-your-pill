@@ -130,7 +130,6 @@ class DenseNet121(nn.Module):
             nn.BatchNorm2d(channels),
             nn.ReLU()
         )
-        print(f"final channels going into the classification layer : {channels} of type : {type(channels)}")
         self.classification = nn.Sequential(
             nn.AdaptiveAvgPool2d((1, 1)),
             nn.Flatten(),
